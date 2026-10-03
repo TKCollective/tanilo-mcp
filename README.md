@@ -97,12 +97,12 @@ A preview is a model-written summary. It is not a signed receipt and it is not p
 
 ## What is in the package but not documented as working
 
-- `research`, `deep-research` and `batch-research` call `POST /research`, `POST /deep-research` and `POST /research/batch`. On 2026-10-03, with no wallet configured, each of the three routes answered HTTP 402 with x402 payment requirements, and the tool returned `payment_required`. No payment was attempted, so this README does not say these tools work.
+- `research`, `deep-research` and `batch-research` call the research routes (`POST /research`, `/deep-research`, `/research/batch`). Those routes ask for x402 payment in USDC on Base. On 2026-10-03, with no wallet configured, each route answered HTTP 402 with payment requirements and the tool returned `payment_required`. No payment was attempted in that check, so this README does not say that a payment completes or what a paid call returns.
 - `resolve` asks a third-party directory (Decixa) for an endpoint. On 2026-10-03 the directory answered HTTP 403 and the tool fell back to a built-in entry.
 
 ## What this server does not do yet
 
-Version 2.1.2 has no tool for Tanilo's claim check (`POST /evaluate`) or its deterministic check (`POST /v1/verify-facts`), so no tool in this server returns a signed receipt. Both routes are live in a rate-limited free beta with no key, and can be called directly:
+Version 2.1.2 has no tool for Tanilo's claim check (`POST /evaluate`) or its deterministic check (`POST /v1/verify-facts`), so no tool in this server returns a signed receipt. Both routes are free during the beta (no key, rate-limited) and can be called directly:
 
 ```bash
 curl -X POST https://api.tanilo.io/evaluate \
