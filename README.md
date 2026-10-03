@@ -97,7 +97,7 @@ A preview is a model-written summary. It is not a signed receipt and it is not p
 
 ## What is in the package but not documented as working
 
-- `research`, `deep-research` and `batch-research` call the research routes (`POST /research`, `/deep-research`, `/research/batch`). Those routes were retired on 2026-10-03, so these three tools no longer return results. x402 pay-per-call is not available.
+- `research`, `deep-research` and `batch-research` call the research routes (`POST /research`, `/deep-research`, `/research/batch`). Those routes were retired on <RETIREMENT DATE>. They answer 410 Gone, so these three tools return the route's retirement message instead of results. x402 pay-per-call is not available.
 - `resolve` asks a third-party directory (Decixa) for an endpoint. On 2026-10-03 the directory answered HTTP 403 and the tool fell back to a built-in entry.
 
 ## What this server does not do yet
