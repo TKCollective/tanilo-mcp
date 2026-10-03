@@ -4,7 +4,7 @@ An MCP server that connects Claude Desktop, Cursor, Windsurf or any other MCP cl
 
 Tanilo was AgentOracle until September 2026. The npm package is still named `agentoracle-mcp`, and will be until a `tanilo-mcp` package is published. The server still calls the API at `agentoracle.co`, which serves the same API as `api.tanilo.io`.
 
-This README describes version 2.1.2 as it behaved on 2026-10-03, when every tool was run once against the live API with no wallet configured.
+This README describes version 2.1.2 as it behaved on 2026-10-03, when every tool was run once against the live API.
 
 ---
 
@@ -97,7 +97,7 @@ A preview is a model-written summary. It is not a signed receipt and it is not p
 
 ## What is in the package but not documented as working
 
-- `research`, `deep-research` and `batch-research` call the research routes (`POST /research`, `/deep-research`, `/research/batch`). Those routes ask for x402 payment in USDC on Base. On 2026-10-03, with no wallet configured, each route answered HTTP 402 with payment requirements and the tool returned `payment_required`. No payment was attempted in that check, so this README does not say that a payment completes or what a paid call returns.
+- `research`, `deep-research` and `batch-research` call the research routes (`POST /research`, `/deep-research`, `/research/batch`). Those routes were retired on 2026-10-03, so these three tools no longer return results. x402 pay-per-call is not available.
 - `resolve` asks a third-party directory (Decixa) for an endpoint. On 2026-10-03 the directory answered HTTP 403 and the tool fell back to a built-in entry.
 
 ## What this server does not do yet
