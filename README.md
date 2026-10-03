@@ -1,11 +1,10 @@
-# agentoracle-mcp
+# Tanilo MCP server
 
-**Add trust verification to Claude, Cursor, Windsurf, or any MCP client 
-in 60 seconds.**
+An MCP server that connects Claude Desktop, Cursor, Windsurf or any other MCP client to the Tanilo API.
 
-AgentOracle verifies claims before your agent acts on them. Per-claim 
-confidence scores, ACT/VERIFY/REJECT recommendations, and 4-source 
-verification — available as an MCP tool with one command.
+Tanilo was AgentOracle until September 2026. The npm package is still named `agentoracle-mcp`, and will be until a `tanilo-mcp` package is published. The server still calls the API at `agentoracle.co`, which serves the same API as `api.tanilo.io`.
+
+This README describes version 2.1.2 as it behaved on 2026-10-03, when every tool was run once against the live API with no wallet configured.
 
 ---
 
@@ -15,11 +14,9 @@ verification — available as an MCP tool with one command.
 npx agentoracle-mcp
 ```
 
-That's it. No API keys. No accounts. No wallet setup required to start.
+No API key and no account are needed for the tools listed under "What works today".
 
----
-
-## Add to Claude Desktop
+### Claude Desktop
 
 Open your Claude Desktop config file:
 
@@ -39,11 +36,9 @@ Add this:
 }
 ```
 
-Restart Claude Desktop. You now have trust verification as a tool.
+Restart Claude Desktop.
 
----
-
-## Add to Cursor
+### Cursor
 
 Open Cursor Settings → MCP → Add Server:
 
@@ -56,9 +51,7 @@ Open Cursor Settings → MCP → Add Server:
 }
 ```
 
----
-
-## Add to Windsurf
+### Windsurf
 
 Open Windsurf Settings → MCP Servers → Add:
 
@@ -73,112 +66,91 @@ Open Windsurf Settings → MCP Servers → Add:
 
 ---
 
-## What you can do once installed
+## What works today
 
-Ask Claude, Cursor, or any MCP client:
+| Tool | What it returned on 2026-10-03 |
+|---|---|
+| `preview` | A short summary, up to two key facts and a confidence score for a question or claim. Free, limited to about 10 calls per hour per IP address. |
+| `check-health` | The API's status document. |
+| `get-manifest` | The API's discovery manifest. |
 
-- *"Verify these claims before I include them in my report"*
-- *"Is it true that OpenAI acquired Anthropic in 2026?"*
-- *"Research AI agent frameworks and tell me what confidence score each claim gets"*
-- *"Fact-check this paragraph before I publish it"*
-
-AgentOracle breaks the input into individual claims, runs each one through 
-4 independent sources, and returns a confidence score and verdict for every 
-single claim.
-
----
-
-## What comes back
+Sample `preview` output, captured live on 2026-10-03 for the query "Paris is the capital of France." and trimmed:
 
 ```json
 {
-  "overall_confidence": 0.91,
-  "recommendation": "act",
-  "claims": [
-    {
-      "claim": "LangGraph leads agent frameworks in 2026",
-      "verdict": "supported",
-      "confidence": 0.94,
-      "evidence": "Confirmed across 4 independent sources"
-    },
-    {
-      "claim": "OpenAI acquired Anthropic in early 2026",
-      "verdict": "refuted",
-      "confidence": 0.04,
-      "correction": "Anthropic remains independent as of April 2026"
-    }
-  ]
+  "preview": true,
+  "query": "Paris is the capital of France.",
+  "result": {
+    "summary": "The statement is true: Paris is the capital of France.",
+    "key_facts": [
+      "Britannica identifies Paris as the national capital of France.",
+      "Multiple retrieved sources, including Britannica, BBC, EBSCO, and Wikipedia, confirm this."
+    ],
+    "confidence_score": 1
+  },
+  "preview_remaining": 9,
+  "preview_limit": "10/hour per IP (approximate — serverless instances may vary)"
 }
 ```
 
----
+A preview is a model-written summary. It is not a signed receipt and it is not proof that the claim is true.
 
-## How verification works
+## What is in the package but not documented as working
 
-Every claim runs through 4 sources in parallel:
+- `research`, `deep-research` and `batch-research` call `POST /research`, `POST /deep-research` and `POST /research/batch`. On 2026-10-03, with no wallet configured, each of the three routes answered HTTP 402 with x402 payment requirements, and the tool returned `payment_required`. No payment was attempted, so this README does not say these tools work.
+- `resolve` asks a third-party directory (Decixa) for an endpoint. On 2026-10-03 the directory answered HTTP 403 and the tool fell back to a built-in entry.
 
-1. **Sonar** — real-time web research
-2. **Sonar Pro** — deep multi-step analysis
-3. **Adversarial** — actively tries to disprove the claim
-4. **Gemma 4** — claim decomposition and confidence calibration
+## What this server does not do yet
 
-Consensus builds the score. Contradiction flags the risk.
-
-| Score | Recommendation | Meaning |
-|-------|---------------|---------|
-| > 0.8 | `act` | Claims verified — proceed |
-| 0.5–0.8 | `verify` | Uncertain — needs review |
-| < 0.5 | `reject` | Contradicted — discard |
-
----
-
-## Pricing
-
-| Endpoint | Price | What it does |
-|----------|-------|-------------|
-| `/preview` | Free | 20 req/hr, no payment needed |
-| `/evaluate` | $0.01/claim | Full per-claim verification |
-| `/research` | $0.02/query | Real-time research + verification |
-
-Payments via [x402 protocol](https://x402.org) — USDC on Base, SKALE 
-(gasless), or Stellar. No subscriptions. No minimums.
-
-The free `/preview` endpoint works with no wallet or setup. 
-Use it to try before you pay.
-
----
-
-## Try it now without installing anything
+Version 2.1.2 has no tool for Tanilo's claim check (`POST /evaluate`) or its deterministic check (`POST /v1/verify-facts`), so no tool in this server returns a signed receipt. Both routes are live in a rate-limited free beta with no key, and can be called directly:
 
 ```bash
-curl -X POST https://agentoracle.co/preview \
+curl -X POST https://api.tanilo.io/evaluate \
   -H "Content-Type: application/json" \
-  -d '{"query": "OpenAI acquired Anthropic in 2026"}'
+  -d '{"content": "Paris is the capital of France."}'
 ```
 
+Part of the response to that request, captured live on 2026-10-03 and trimmed:
+
+```json
+{
+  "evaluation": {
+    "overall_confidence": 1,
+    "recommendation": "act",
+    "total_claims": 1,
+    "verification_method": "model-checks",
+    "claims": [
+      {
+        "claim": "Paris is the capital of France.",
+        "verdict": "supported",
+        "confidence": 1,
+        "adversarial_result": "resistant"
+      }
+    ]
+  },
+  "receipt": {
+    "canonical_sha256": "sha256-7b83b120899ea368c2397b9ec0832ae3e0499b430b8245e184b45c37112e1edc",
+    "kid": "tanilo-2026-10-ed25519-7d885da9",
+    "envelope_kind": "verification.v0.3+composed",
+    "verdict": "act",
+    "v_recommendation": "confident_supported"
+  }
+}
+```
+
+How `/evaluate` reaches a result: model checks, including one that argues against the claim, combined under a published rule. Sources are listed with the result for reference; they don't feed the verdict yet.
+
+The receipt is signed. Anyone can check the signature offline with [`tanilo-receipt-verify`](https://github.com/TKCollective/tanilo-receipt-verify) against the key set at `https://tanilo.io/.well-known/jwks.json`. A valid signature shows which key signed those bytes. It is not proof that the claim is true.
+
 ---
 
-## Related
+## Links
 
-- [agentoracle.co](https://agentoracle.co) — main site + live demo
-- [Trust Layer docs](https://agentoracle.co/trust) — full API reference
-- [langchain-agentoracle](https://github.com/TKCollective/langchain-agentoracle) — LangChain integration
-- [crewai-agentoracle](https://github.com/TKCollective/crewai-agentoracle) — CrewAI integration
-- [x402 manifest](https://agentoracle.co/.well-known/x402.json) — agent-native pricing discovery
+- [tanilo.io](https://tanilo.io) — site and documentation
+- [tanilo.io/trust](https://tanilo.io/trust) — keys, and what a signature does and does not establish
+- [tanilo-receipt-spec](https://github.com/TKCollective/tanilo-receipt-spec) — the receipt format
+- [tanilo-receipt-verify](https://github.com/TKCollective/tanilo-receipt-verify) — offline signature check
 
----
+Contact: joe@tanilo.io
 
-Built by [TK Collective](https://agentoracle.co) · x402 native · Base · SKALE · Stellar
-
-## Discovery
-
-`agentoracle-mcp` is listed on independent x402 discovery directories:
-
-- **[Decixa](https://decixa.ai)** — Auto-indexed x402 directory with live probe verification. AgentOracle is classified under **Analyze** with tags *Verification, Data Enrichment*. View listings:
-  - [Research](https://decixa.ai/apis/e51015a6-b977-43e8-876d-e5f6bdaad92d) — $0.02/call
-  - [Deep Research](https://decixa.ai/apis/0fc0fd3a-ffb4-494e-b00f-4ec9a13c33ca) — $0.10/call
-  - [Evaluate](https://decixa.ai/apis/11abb2ea-da04-42aa-a0da-5d07a6e36255) — free during beta
-- **[Glama](https://glama.ai/mcp/servers/TKCollective/agentoracle-mcp)** — Curated MCP directory
-
-Future versions of `agentoracle-mcp` will use Decixa's `/api/agent/resolve` as primary capability discovery with a local fallback — letting agents find the best-matching x402 endpoint by intent rather than hardcoded URLs.
-
+MIT licensed. TK Collective LLC.
