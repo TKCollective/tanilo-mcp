@@ -4,7 +4,7 @@ An MCP server that connects Claude Desktop, Cursor, Windsurf or any other MCP cl
 
 Tanilo was AgentOracle until September 2026. The npm package is still named `agentoracle-mcp`, and will be until a `tanilo-mcp` package is published. The server still calls the API at `agentoracle.co`, which serves the same API as `api.tanilo.io`.
 
-This README describes version 2.1.2 as it behaved on 2026-10-03, when every tool was run once against the live API.
+This README describes version 2.1.2 as it behaved on 2026-10-04, when every tool was run once against the live API, after the research routes were retired.
 
 ---
 
@@ -68,23 +68,23 @@ Open Windsurf Settings → MCP Servers → Add:
 
 ## What works today
 
-| Tool | What it returned on 2026-10-03 |
+| Tool | What it returned on 2026-10-04 |
 |---|---|
 | `preview` | A short summary, up to two key facts and a confidence score for a question or claim. Free, limited to about 10 calls per hour per IP address. |
 | `check-health` | The API's status document. |
-| `get-manifest` | The API's discovery manifest. |
+| `get-manifest` | The API's discovery document, which now lists no payable resources. |
 
-Sample `preview` output, captured live on 2026-10-03 for the query "Paris is the capital of France." and trimmed:
+Sample `preview` output, captured live on 2026-10-04 for the query "Paris is the capital of France." and trimmed:
 
 ```json
 {
   "preview": true,
   "query": "Paris is the capital of France.",
   "result": {
-    "summary": "The statement is true: Paris is the capital of France.",
+    "summary": "The statement is supported: Paris is the capital of France.",
     "key_facts": [
       "Britannica identifies Paris as the national capital of France.",
-      "Multiple retrieved sources, including Britannica, BBC, EBSCO, and Wikipedia, confirm this."
+      "Multiple additional sources also state that Paris is the capital city of France."
     ],
     "confidence_score": 1
   },
@@ -97,8 +97,8 @@ A preview is a model-written summary. It is not a signed receipt and it is not p
 
 ## What is in the package but not documented as working
 
-- `research`, `deep-research` and `batch-research` call three of the research routes (`POST /research`, `/deep-research`, `/research/batch`). All four research routes (those three and `/deep-research/skale`) were retired on 2026-10-04. They answer 410 Gone, so these three tools return the route's retirement message instead of results. x402 pay-per-call is not available.
-- `resolve` asks a third-party directory (Decixa) for an endpoint. On 2026-10-03 the directory answered HTTP 403 and the tool fell back to a built-in entry.
+- `research`, `deep-research` and `batch-research` call three of the research routes (`POST /research`, `/deep-research`, `/research/batch`). All four research routes (those three and `/deep-research/skale`) were retired on 2026-10-04 and answer 410 Gone. On 2026-10-04 each of the three tools returned an error carrying the route's retirement message, for example `Research failed (HTTP 410): {"error":"route_retired", …}`, instead of results. x402 pay-per-call is not available.
+- `resolve` asks a third-party directory (Decixa) for an endpoint. On 2026-10-04 the directory answered HTTP 403 and the tool fell back to an entry built into the package. That entry still names the retired `/research` route and a price, so its answer is out of date.
 
 ## What this server does not do yet
 
