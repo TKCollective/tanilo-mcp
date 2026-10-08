@@ -1,52 +1,43 @@
 {
-  "name": "agentoracle-mcp",
-  "version": "2.1.2",
-  "description": "MCP server for AgentOracle \u2014 claim verification for AI agents. Verify before you act. x402-native on Base, SKALE, Stellar.",
+  "name": "tanilo-mcp",
+  "version": "3.0.0",
+  "mcpName": "io.github.TKCollective/tanilo-mcp",
+  "description": "Tanilo checks the premise before an AI agent acts. Contract price check with a signed receipt.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "agentoracle-mcp": "dist/index.js"
+    "tanilo-mcp": "dist/index.js"
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
+    "test": "node --test",
     "prepublishOnly": "npm run build && chmod +x dist/index.js"
   },
   "keywords": [
-    "agentoracle",
-    "ai-agents",
-    "base",
-    "claim-verification",
-    "claude",
-    "crewai",
-    "cursor",
-    "hallucination-detection",
-    "langchain",
+    "tanilo",
     "mcp",
     "mcp-server",
-    "micropayments",
     "model-context-protocol",
-    "perplexity",
-    "research",
-    "skale",
-    "trust-layer",
-    "usdc",
-    "verification",
-    "x402"
+    "signed-receipts",
+    "contract-price-check",
+    "verify-facts",
+    "ai-agents",
+    "pre-action-verification"
   ],
-  "author": "AgentOracle",
+  "author": "TK Collective LLC",
   "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.7.0",
-    "@x402/fetch": "^2.8.0",
-    "@x402/core": "^2.8.0",
-    "@x402/evm": "^2.8.0",
-    "viem": "^2.0.0",
     "zod": "^3.22.0"
   },
   "devDependencies": {
@@ -56,10 +47,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/TKCollective/agentoracle-mcp"
+    "url": "https://github.com/TKCollective/tanilo-mcp"
   },
-  "homepage": "https://agentoracle.co",
+  "homepage": "https://tanilo.io",
   "bugs": {
-    "url": "https://github.com/TKCollective/agentoracle-mcp/issues"
+    "url": "https://github.com/TKCollective/tanilo-mcp/issues"
   }
 }

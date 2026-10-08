@@ -1,815 +1,202 @@
 #!/usr/bin/env node
 /**
- * AgentOracle MCP Server — x402 Paid Research Tools
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- * Connects AI assistants (Claude, Cursor, etc.) to AgentOracle's
- * real-time research API via the Model Context Protocol.
+ * Tanilo MCP server
  *
- * x402 Payment Integration:
- *   When a wallet private key is provided, the MCP server uses
- *   @x402/fetch to automatically handle x402 payment flows.
- *   The agent's wallet signs USDC payments transparently on
- *   Base mainnet or SKALE (gasless).
+ * Connects an MCP client (Claude Desktop, Cursor, Windsurf, ...) to the Tanilo API
+ * at https://api.tanilo.io over stdio. Three tools:
  *
- * Setup in Claude Desktop config:
- *   {
- *     "mcpServers": {
- *       "agentoracle": {
- *         "command": "npx",
- *         "args": ["agentoracle-mcp"],
- *         "env": {
- *           "AGENTORACLE_WALLET_PRIVATE_KEY": "0x..."
- *         }
- *       }
- *     }
- *   }
+ *   check-contract-price  POST /v1/verify-facts, check type contract_price_match
+ *   check-health          GET  /health
+ *   get-manifest          GET  /.well-known/x402-manifest.json
  *
- * Without a wallet key, the server still works — it returns
- * x402 payment instructions so the caller can handle payment
- * through their own x402 client.
+ * The routes are free during the beta, rate-limited, no key needed. No payment
+ * code, no wallet, no secrets: this server holds nothing but the URLs below.
+ *
+ * Tool descriptions quote tanilo.io (https://tanilo.io/docs/contract-price-check,
+ * https://tanilo.io/pricing, https://tanilo.io). They are not reworded here.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-// ── x402 Payment Imports ──────────────────────────────────────────
-// These are optional — if the packages aren't installed, the server
-// falls back to returning 402 payment instructions.
-let paidFetch: typeof fetch | null = null;
-let walletConfigured = false;
+export const VERSION = "3.0.0";
 
-async function initX402(): Promise<void> {
-  const privKey = process.env.AGENTORACLE_WALLET_PRIVATE_KEY;
-  if (!privKey) {
-    console.error(
-      "No wallet key — x402 auto-pay disabled. Set AGENTORACLE_WALLET_PRIVATE_KEY to enable."
-    );
-    return;
-  }
+// The API base can be overridden for tests only; the default is the live API.
+const API_BASE = process.env.TANILO_API_BASE || "https://api.tanilo.io";
+const VERIFY_FACTS_ENDPOINT = `${API_BASE}/v1/verify-facts`;
+const HEALTH_ENDPOINT = `${API_BASE}/health`;
+const MANIFEST_ENDPOINT = `${API_BASE}/.well-known/x402-manifest.json`;
 
+const USER_AGENT = `tanilo-mcp/${VERSION}`;
+
+// ── Input shapes (from https://tanilo.io/docs/contract-price-check) ──────────
+// Prices and quantities are decimal strings, as the docs page shows ("2.00",
+// "1"); a number such as 2 is refused by the API as invalid_input.
+
+const decimalString = z
+  .string()
+  .regex(/^-?\d+(\.\d+)?$/, "a decimal string such as \"2.00\"");
+
+const offerSchema = z
+  .object({
+    unit_price: decimalString.describe("Offered price per unit, as a decimal string, e.g. \"2.00\""),
+    currency: z.string().describe("ISO 4217 code, e.g. \"USD\""),
+    unit: z.string().describe("Unit the price applies to, e.g. \"call\""),
+    quantity: decimalString.optional().describe("Quantity offered, as a decimal string, e.g. \"1\""),
+    seller: z.string().optional().describe("Seller identifier, e.g. \"seller.example\""),
+    sku: z.string().optional().describe("Product or resource identifier, e.g. \"api.weather.v1\""),
+    offered_at: z.string().optional().describe("When the offer was made, RFC 3339 UTC, e.g. \"2026-10-01T12:00:00Z\""),
+  })
+  .passthrough();
+
+const tierSchema = z
+  .object({
+    min_quantity: decimalString,
+    max_quantity: decimalString.optional(),
+    price_per_unit: decimalString,
+  })
+  .passthrough();
+
+const termSchema = z
+  .object({
+    agreement_id: z.string(),
+    version: z.string(),
+    seller: z.string().optional(),
+    product_scope: z.object({ skus: z.array(z.string()) }).passthrough().optional(),
+    currency: z.string(),
+    unit: z.string(),
+    price_per_unit: decimalString.optional().describe("Flat price per unit; omit when tiers are given"),
+    tiers: z.array(tierSchema).optional().describe("Quantity tiers; each runs from min_quantity up to, but not including, max_quantity"),
+    effective_from: z.string().optional(),
+    effective_to: z.string().optional(),
+    supersedes: z.string().optional().describe("Version this term replaces"),
+  })
+  .passthrough();
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function textResult(data: unknown, isError = false) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+    ...(isError ? { isError: true } : {}),
+  };
+}
+
+function errorResult(message: string) {
+  return { content: [{ type: "text" as const, text: message }], isError: true };
+}
+
+async function getJson(url: string, label: string) {
   try {
-    const { wrapFetchWithPayment } = await import("@x402/fetch");
-    const { x402Client } = await import("@x402/core/client");
-    const { registerExactEvmScheme } = await import(
-      "@x402/evm/exact/client"
-    );
-    const { privateKeyToAccount } = await import("viem/accounts");
-
-    const account = privateKeyToAccount(privKey as `0x${string}`);
-    const client = new x402Client();
-    registerExactEvmScheme(client, { signer: account });
-    paidFetch = wrapFetchWithPayment(fetch, client);
-    walletConfigured = true;
-    console.error(
-      `x402 auto-pay enabled — wallet ${account.address.slice(0, 6)}...${account.address.slice(-4)}`
-    );
-  } catch (err) {
-    console.error(
-      "x402 SDK not installed — run: npm i @x402/fetch @x402/core @x402/evm viem"
-    );
-    console.error("Falling back to manual payment instructions.");
+    const response = await fetch(url, { headers: { "user-agent": USER_AGENT } });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return errorResult(`${label} failed (HTTP ${response.status}): ${JSON.stringify(data)}`);
+    return textResult(data);
+  } catch (error) {
+    return errorResult(`${label} failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-// ── Constants ─────────────────────────────────────────────────────
-const AGENTORACLE_API = "https://agentoracle.co";
-const RESEARCH_ENDPOINT = `${AGENTORACLE_API}/research`;
-const DEEP_RESEARCH_ENDPOINT = `${AGENTORACLE_API}/deep-research`;
-const PREVIEW_ENDPOINT = `${AGENTORACLE_API}/preview`;
-const BATCH_ENDPOINT = `${AGENTORACLE_API}/research/batch`;
-const EVALUATE_ENDPOINT = `${AGENTORACLE_API}/evaluate`;
-const HEALTH_ENDPOINT = `${AGENTORACLE_API}/health`;
-const MANIFEST_ENDPOINT = `${AGENTORACLE_API}/.well-known/x402-manifest.json`;
+// ── MCP server ──────────────────────────────────────────────────────────────
 
-// ── Decixa Discovery ──────────────────────────────────────────────
-// Decixa indexes x402 endpoints across the ecosystem. We use their
-// /api/agent/resolve as primary multi-provider discovery, with a
-// local registry as fallback if Decixa is unreachable.
-const DECIXA_RESOLVE_ENDPOINT = "https://api.decixa.ai/api/agent/resolve";
+export const server = new McpServer({ name: "Tanilo", version: VERSION });
 
-// Hardening parameters — tunable via env for ops flexibility
-const DECIXA_TIMEOUT_MS = parseInt(
-  process.env.DECIXA_RESOLVE_TIMEOUT_MS || "4000",
-  10
-);
-const DECIXA_MAX_RETRIES = parseInt(
-  process.env.DECIXA_RESOLVE_MAX_RETRIES || "2",
-  10
-);
-const DECIXA_RETRY_BASE_MS = parseInt(
-  process.env.DECIXA_RESOLVE_RETRY_BASE_MS || "250",
-  10
-);
-// Jitter cap as fraction of base delay; 0.3 = up to ±30% jitter on each backoff.
-// Prevents thundering-herd retry sync when many clients hit Decixa simultaneously.
-const DECIXA_RETRY_JITTER = parseFloat(
-  process.env.DECIXA_RESOLVE_RETRY_JITTER || "0.3"
-);
-
-const DECIXA_CAPABILITIES = [
-  "search",
-  "extract",
-  "transform",
-  "analyze",
-  "generate",
-  "modify",
-  "communicate",
-  "transact",
-  "store",
-] as const;
-
-// Local fallback registry — AgentOracle's own offerings, used if
-// Decixa is unreachable. Mirrors Decixa's response shape for
-// consistent downstream handling.
-const LOCAL_FALLBACK_REGISTRY: Record<string, any> = {
-  analyze: {
-    id: "local-agentoracle-research",
-    name: "AgentOracle — Research",
-    endpoint: RESEARCH_ENDPOINT,
-    capability: "Analyze",
-    tags: ["Verification", "Data Enrichment"],
-    pricing: { model: "per_call", usdc_per_call: 0.02 },
-    latency_tier: "medium",
-    agent_ready: true,
-    source: "local_fallback",
-  },
-  search: {
-    id: "local-agentoracle-research-search",
-    name: "AgentOracle — Research",
-    endpoint: RESEARCH_ENDPOINT,
-    capability: "Search",
-    tags: ["Verification", "Live Web"],
-    pricing: { model: "per_call", usdc_per_call: 0.02 },
-    latency_tier: "medium",
-    agent_ready: true,
-    source: "local_fallback",
-  },
-};
-
-// Use paidFetch if available, otherwise standard fetch
-function getFetch(): typeof fetch {
-  return paidFetch || fetch;
-}
-
-// ── MCP Server ────────────────────────────────────────────────────
-const server = new McpServer({
-  name: "AgentOracle",
-  version: "2.1.2",
-});
-
-// ── Tool: preview (FREE) ─────────────────────────────────────────
 server.tool(
-  "preview",
-  "Free research preview — get a quick summary, 2 key facts, and confidence score for any query. No payment required. Use this to test queries before committing to a paid research call. Rate limited to 10/hour.",
+  "check-contract-price",
+  // Quoted from https://tanilo.io/docs/contract-price-check and https://tanilo.io/pricing.
+  "Does this offer match the terms you supplied? Before an agent accepts an offer, contract_price_match compares the offer's unit price with the applicable term among the terms you supply, and signs the result when signing succeeds. " +
+    "No model is involved: the result is arithmetic and exact comparison, and anyone holding the same input can recompute it. You supply the terms; Tanilo does not hold or look up your contracts. " +
+    "Three results: verified, contradicted, or indeterminate with a reason. A verified result says the price matches the supplied term. Whether to pay is your policy's decision. " +
+    "A valid signature shows which key signed these bytes and that they have not changed since. It does not show that the supplied terms were genuine. " +
+    "POST /v1/verify-facts is live in free beta, rate-limited, no key needed.",
   {
-    query: z
+    offer: offerSchema.describe("The offer to check"),
+    terms: z.array(termSchema).describe("The terms you supply (caller-supplied, not verified as genuine). May be empty: the result is then indeterminate with reason no_applicable_term."),
+    claim_hash: z
       .string()
-      .max(2000)
-      .describe("Natural language research question"),
+      .regex(/^sha256-[0-9a-f]{64}$/)
+      .optional()
+      .describe("Optional subject.claim_hash. Any hash that identifies the purchase for you; by default the SHA-256 of the canonical JSON of the input object is used."),
+    agent_id: z.string().optional().describe("Optional agent identifier recorded in the receipt; otherwise the receipt carries did:ao:verify-facts:anonymous"),
   },
-  async ({ query }) => {
+  async ({ offer, terms, claim_hash, agent_id }) => {
+    const input = { offer, terms };
+    const subject = { claim_hash: claim_hash ?? (await sha256Canonical(input)) };
+    const body: Record<string, unknown> = {
+      subject,
+      checks: [{ check_type: "contract_price_match", input }],
+    };
+    if (agent_id) body.agent_id = agent_id;
+
+    let response: Response;
     try {
-      const response = await fetch(PREVIEW_ENDPOINT, {
+      response = await fetch(VERIFY_FACTS_ENDPOINT, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+        headers: { "content-type": "application/json", "user-agent": USER_AGENT },
+        body: JSON.stringify(body),
       });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Preview failed (HTTP ${response.status}): ${JSON.stringify(err)}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      const data = await response.json();
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
-      };
     } catch (error) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
+      return errorResult(`Contract price check failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return errorResult(`Contract price check failed (HTTP ${response.status}): ${JSON.stringify(data)}`);
+    }
+
+    // Return the check result plus the signed receipt, as the API sent them.
+    const result = Array.isArray(data.check_results) ? data.check_results[0] : undefined;
+    return textResult({
+      verdict: data.verdict,
+      state: result?.state,
+      outcome: result?.outcome,
+      reason: result?.failure_reason ?? result?.indeterminate_reason ?? null,
+      recommendation: result?.recommendation,
+      evidence: result?.evidence,
+      check_mode: data.check_mode,
+      canonical_sha256: data.canonical_sha256,
+      kid: data.kid,
+      jwks_url: data.jwks_url,
+      receipt: data.jws,
+      note:
+        "A valid signature shows which key signed these bytes and that they have not changed since. It does not show that the supplied terms were genuine. Check the signature offline with tanilo-receipt-verify against the published key set.",
+    });
   }
 );
 
-// ── Tool: research ($0.02 USDC) ──────────────────────────────────
-server.tool(
-  "research",
-  "Real-time research on any topic. Returns structured JSON with summary, key facts, cited sources, and confidence score. Costs $0.02 USDC via x402 (Base or SKALE gasless). If a wallet is configured, payment is handled automatically.",
-  {
-    query: z
-      .string()
-      .max(2000)
-      .describe(
-        "Natural language research question. Examples: 'Latest AI chip architectures', 'Compare React vs Vue in 2026'"
-      ),
-  },
-  async ({ query }) => {
-    try {
-      const f = getFetch();
-      const response = await f(RESEARCH_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
-      });
-
-      // If 402 and no auto-pay, return payment instructions
-      if (response.status === 402 && !walletConfigured) {
-        const paymentInfo = await response.json();
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
-                {
-                  status: "payment_required",
-                  message:
-                    "This query requires $0.02 USDC via x402. Configure AGENTORACLE_WALLET_PRIVATE_KEY for auto-pay, or use an x402 client.",
-                  payment_details: paymentInfo,
-                  endpoint: RESEARCH_ENDPOINT,
-                  manifest: MANIFEST_ENDPOINT,
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
-      }
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Research failed (HTTP ${response.status}): ${JSON.stringify(err)}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      const data = await response.json();
-
-      // Include payment receipt if available
-      const paymentResponse = response.headers.get("payment-response");
-      if (paymentResponse) {
-        data._payment = {
-          status: "settled",
-          receipt: paymentResponse,
-        };
-      }
-
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  }
-);
-
-// ── Tool: deep-research ($0.10 USDC) ─────────────────────────────
-server.tool(
-  "deep-research",
-  "Comprehensive deep research using Sonar Pro. Returns expert-level analysis with 10-15 detailed facts, in-depth synthesis, cited sources, and confidence score. Costs $0.10 USDC via x402. Use for complex topics requiring thorough analysis.",
-  {
-    query: z
-      .string()
-      .max(4000)
-      .describe(
-        "Research question for deep analysis. Examples: 'Comprehensive analysis of x402 protocol adoption', 'Detailed comparison of AI agent frameworks'"
-      ),
-  },
-  async ({ query }) => {
-    try {
-      const f = getFetch();
-      const response = await f(DEEP_RESEARCH_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
-      });
-
-      if (response.status === 402 && !walletConfigured) {
-        const paymentInfo = await response.json();
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
-                {
-                  status: "payment_required",
-                  message:
-                    "Deep research requires $0.10 USDC via x402. Configure AGENTORACLE_WALLET_PRIVATE_KEY for auto-pay.",
-                  payment_details: paymentInfo,
-                  endpoint: DEEP_RESEARCH_ENDPOINT,
-                  manifest: MANIFEST_ENDPOINT,
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
-      }
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Deep research failed (HTTP ${response.status}): ${JSON.stringify(err)}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      const data = await response.json();
-      const paymentResponse = response.headers.get("payment-response");
-      if (paymentResponse) {
-        data._payment = { status: "settled", receipt: paymentResponse };
-      }
-
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  }
-);
-
-// ── Tool: batch-research ($0.10 USDC for up to 5 queries) ────────
-server.tool(
-  "batch-research",
-  "Batch research — submit up to 5 queries in one call, processed in parallel. Costs $0.10 USDC total via x402. More efficient than individual research calls for multi-topic analysis.",
-  {
-    queries: z
-      .array(z.string().max(2000))
-      .min(1)
-      .max(5)
-      .describe("Array of 1-5 natural language research questions"),
-  },
-  async ({ queries }) => {
-    try {
-      const f = getFetch();
-      const response = await f(BATCH_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ queries }),
-      });
-
-      if (response.status === 402 && !walletConfigured) {
-        const paymentInfo = await response.json();
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
-                {
-                  status: "payment_required",
-                  message:
-                    "Batch research requires $0.10 USDC via x402 for up to 5 queries.",
-                  payment_details: paymentInfo,
-                  endpoint: BATCH_ENDPOINT,
-                  manifest: MANIFEST_ENDPOINT,
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
-      }
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Batch research failed (HTTP ${response.status}): ${JSON.stringify(err)}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      const data = await response.json();
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  }
-);
-
-// ── Tool: check-health (FREE) ────────────────────────────────────
 server.tool(
   "check-health",
-  "Check if AgentOracle API is online. Returns service status, uptime, pricing, supported networks, and feature flags.",
+  "Returns the Tanilo API's status document (GET https://api.tanilo.io/health): service status, the live routes and their prices, the retired routes, and rate limits.",
   {},
-  async () => {
-    try {
-      const response = await fetch(HEALTH_ENDPOINT);
-      const data = await response.json();
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Health check failed: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  }
+  async () => getJson(HEALTH_ENDPOINT, "Health check")
 );
 
-// Lightweight intent → capability inference for the local fallback path.
-// Used only when Decixa is unreachable AND the caller didn't supply a
-// capability hint (Phase 3 made it optional). Keyword-based, no LLM call.
-function inferFallbackCapability(intent: string): string {
-  const t = intent.toLowerCase();
-  if (/\b(verify|fact[- ]?check|validate|claim|truth|hallucinat|adversarial|confidence)\b/.test(t))
-    return "analyze";
-  if (/\b(search|find|lookup|discover|where is|who is|what is)\b/.test(t))
-    return "search";
-  if (/\b(extract|parse|pull|scrape|read)\b/.test(t)) return "extract";
-  if (/\b(transform|convert|translate|reformat|rewrite)\b/.test(t))
-    return "transform";
-  if (/\b(generate|create|write|compose|draft)\b/.test(t)) return "generate";
-  if (/\b(modify|update|edit|change|patch)\b/.test(t)) return "modify";
-  if (/\b(send|notify|message|email|post|publish)\b/.test(t))
-    return "communicate";
-  if (/\b(pay|buy|purchase|swap|transfer|settle|transact)\b/.test(t))
-    return "transact";
-  if (/\b(store|save|persist|cache|record)\b/.test(t)) return "store";
-  return "analyze"; // AgentOracle's primary classification
-}
-
-// ── Tool: resolve (FREE) ─────────────────────────────────────────
-// Multi-provider discovery via Decixa, with local fallback.
-server.tool(
-  "resolve",
-  "Discover the best x402 API endpoint for a given intent. Uses Decixa's /api/agent/resolve (intent-driven, OpenAPI v1.1.0) as primary multi-provider discovery, with a local AgentOracle registry as fallback. Returns the recommended endpoint plus top alternatives, ranked by latency, price, and tag match. As of Decixa Phase 3 (v1.1.0), capability is optional — raw intent gets ~85% top-3 hit rate. Free, no payment required.",
-  {
-    intent: z
-      .string()
-      .max(500)
-      .describe(
-        "Natural-language description of the task. Example: 'verify a factual claim before acting'"
-      ),
-    capability: z
-      .enum(DECIXA_CAPABILITIES)
-      .optional()
-      .describe(
-        "Optional verb-based hint (Phase 3): search / extract / transform / analyze / generate / modify / communicate / transact / store. Decixa now resolves on intent alone with ~85% top-3 hit rate; pass capability only when you want to bias the result toward a specific verb."
-      ),
-    budget: z
-      .number()
-      .optional()
-      .describe("Optional: maximum USDC per call"),
-    latency: z
-      .enum(["low", "medium", "high"])
-      .optional()
-      .describe("Optional: preferred latency tier"),
-  },
-  async ({ capability, intent, budget, latency }) => {
-    const constraints: Record<string, any> = {};
-    if (typeof budget === "number") constraints.budget = budget;
-    if (latency) constraints.latency = latency;
-
-    // Primary: Decixa — with timeout + retry for transient failures.
-    // We retry on: network errors, AbortErrors (timeouts), 5xx, and 408.
-    // We do NOT retry on: 4xx other than 408 (deterministic — bad input,
-    // auth, not-found — retrying wastes time). 429 is treated as retryable
-    // ONLY when a Retry-After header is supplied; otherwise we fall back
-    // immediately to avoid hammering a rate-limited provider.
-    //
-    // As of Decixa v1.1.0 (Phase 3) capability is optional. We still send
-    // it when supplied as a bias hint; otherwise we omit the field and let
-    // the resolver work intent-first.
-    const requestPayload: Record<string, any> = { intent, constraints };
-    if (capability) requestPayload.capability = capability.toLowerCase();
-    const requestBody = JSON.stringify(requestPayload);
-
-    const maxAttempts = Math.max(1, DECIXA_MAX_RETRIES + 1);
-    let last_error_detail = "";
-    // last_status is informational; reserved for future structured error responses.
-    let last_status = 0;
-    void last_status;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), DECIXA_TIMEOUT_MS);
-      try {
-        const response = await fetch(DECIXA_RESOLVE_ENDPOINT, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: requestBody,
-          signal: controller.signal,
-        });
-        clearTimeout(timer);
-
-        if (response.ok) {
-          const data = await response.json();
-          // Decixa Phase 3 (v1.1.0) added recommendation_status, min_similarity,
-          // and trust_evidence to the response. Surface those so MCP clients can
-          // gate or display borderline matches without a second round-trip.
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify(
-                  {
-                    ...data,
-                    discovery_source: "decixa",
-                    discovery_attempts: attempt,
-                    api_version: "decixa/v1.1.0",
-                  },
-                  null,
-                  2
-                ),
-              },
-            ],
-          };
-        }
-
-        last_status = response.status;
-        last_error_detail = `HTTP ${response.status}`;
-
-        // 408 Request Timeout — server-side timeout, retry it
-        if (response.status === 408) {
-          console.error(
-            `[resolve] Decixa returned 408 on attempt ${attempt}/${maxAttempts}, retrying`
-          );
-        }
-        // 429 Too Many Requests — only retry when Retry-After is present and
-        // small; otherwise fall back immediately rather than queue.
-        else if (response.status === 429) {
-          const retryAfter = response.headers.get("retry-after");
-          const retrySeconds = retryAfter ? parseInt(retryAfter, 10) : NaN;
-          if (
-            !isNaN(retrySeconds) &&
-            retrySeconds > 0 &&
-            retrySeconds <= 5 &&
-            attempt < maxAttempts
-          ) {
-            console.error(
-              `[resolve] Decixa 429 on attempt ${attempt}/${maxAttempts}, honoring Retry-After=${retrySeconds}s`
-            );
-            await new Promise((r) =>
-              setTimeout(r, retrySeconds * 1000)
-            );
-            continue; // skip default backoff, we've already waited
-          }
-          console.error(
-            `[resolve] Decixa 429 (rate-limited, no Retry-After or > 5s), using local fallback`
-          );
-          break;
-        }
-        // Other 4xx — deterministic, do not retry
-        else if (response.status >= 400 && response.status < 500) {
-          console.error(
-            `[resolve] Decixa returned ${response.status} (non-retryable), using local fallback`
-          );
-          break;
-        }
-
-        // 5xx — fall through to retry loop
-        else {
-          console.error(
-            `[resolve] Decixa returned ${response.status} on attempt ${attempt}/${maxAttempts}`
-          );
-        }
-      } catch (err) {
-        clearTimeout(timer);
-        const name =
-          err instanceof Error ? err.name : "UnknownError";
-        const msg =
-          err instanceof Error ? err.message : String(err);
-        last_error_detail = `${name}: ${msg}`;
-        const isTimeout = name === "AbortError" || /abort/i.test(msg);
-        console.error(
-          `[resolve] Decixa ${isTimeout ? "timed out" : "error"} on attempt ${attempt}/${maxAttempts}: ${msg}`
-        );
-      }
-
-      // Backoff before next attempt (skip after last). Adds jitter to
-      // prevent thundering-herd resync across multiple clients retrying
-      // the same outage window.
-      if (attempt < maxAttempts) {
-        const baseDelay =
-          DECIXA_RETRY_BASE_MS * Math.pow(2, attempt - 1);
-        const jitterRange = baseDelay * DECIXA_RETRY_JITTER;
-        const jitter = (Math.random() * 2 - 1) * jitterRange; // [-range, +range]
-        const delay = Math.max(0, Math.round(baseDelay + jitter));
-        await new Promise((r) => setTimeout(r, delay));
-      }
-    }
-
-    console.error(
-      `[resolve] Decixa failed after ${maxAttempts} attempt(s) (${last_error_detail}), using local fallback`
-    );
-
-    // Fallback: local registry. capability is now optional, so we infer
-    // from intent text when missing — default to "analyze" since that's
-    // AgentOracle's primary classification.
-    const fallbackKey = capability
-      ? capability.toLowerCase()
-      : inferFallbackCapability(intent);
-    const local = LOCAL_FALLBACK_REGISTRY[fallbackKey];
-    if (local) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(
-              {
-                recommended: local,
-                alternatives: [],
-                is_fallback: true,
-                strict_match_count: 1,
-                fallback_match_count: 0,
-                ranking_basis: "local_registry",
-                discovery_source: "local_fallback",
-                discovery_attempts: maxAttempts,
-                discovery_error: last_error_detail || "Decixa unreachable",
-                note:
-                  "Decixa discovery was unreachable after retries — returned local AgentOracle registry entry only.",
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    }
-
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify(
-            {
-              recommended: null,
-              alternatives: [],
-              is_fallback: true,
-              discovery_source: "local_fallback",
-              error: `No local registry entry for inferred capability '${fallbackKey}' and Decixa unreachable.`,
-              suggestion:
-                "Pass an explicit capability='analyze' or 'search' — AgentOracle's primary classification.",
-            },
-            null,
-            2
-          ),
-        },
-      ],
-      isError: true,
-    };
-  }
-);
-
-// ── Tool: get-manifest (FREE) ────────────────────────────────────
 server.tool(
   "get-manifest",
-  "Get the x402 payment manifest. Returns payment requirements, supported networks (Base + SKALE), pricing tiers, and endpoint details for programmatic integration.",
+  "Returns the Tanilo API's discovery document (GET https://api.tanilo.io/.well-known/x402-manifest.json). It lists no payable resources: the paid research routes were retired on 2026-10-04.",
   {},
-  async () => {
-    try {
-      const response = await fetch(MANIFEST_ENDPOINT);
-      const data = await response.json();
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Failed to fetch manifest: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  }
+  async () => getJson(MANIFEST_ENDPOINT, "Manifest fetch")
 );
 
-// ── Resource: API docs ────────────────────────────────────────────
-server.resource(
-  "api-docs",
-  "docs://agentoracle/api",
-  {
-    description:
-      "AgentOracle API documentation — endpoints, pricing, x402 payment flow, and integration guide",
-    mimeType: "text/markdown",
-  },
-  async () => ({
-    contents: [
-      {
-        uri: "docs://agentoracle/api",
-        mimeType: "text/markdown",
-        text: `# AgentOracle API Documentation
+// JCS-style canonical JSON (sorted keys, no whitespace) hashed with SHA-256, for the
+// default claim_hash. Values here are strings, arrays and objects only; no floats.
+async function sha256Canonical(value: unknown): Promise<string> {
+  const { createHash } = await import("node:crypto");
+  const canonical = (v: any): string => {
+    if (v === null || typeof v !== "object") return JSON.stringify(v);
+    if (Array.isArray(v)) return "[" + v.map(canonical).join(",") + "]";
+    return "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + canonical(v[k])).join(",") + "}";
+  };
+  return "sha256-" + createHash("sha256").update(canonical(value), "utf8").digest("hex");
+}
 
-## Overview
-AgentOracle is a pay-per-query research API for AI agents using x402 protocol.
-No API keys. No accounts. Just pay with USDC.
+// ── Start ───────────────────────────────────────────────────────────────────
 
-## Pricing
-| Endpoint | Price | Model |
-|----------|-------|-------|
-| POST /preview | FREE | Sonar |
-| POST /research | $0.02 USDC | Sonar |
-| POST /deep-research | $0.10 USDC | Sonar Pro |
-| POST /research/batch | $0.10 USDC (up to 5) | Sonar |
-
-## Networks
-- **Base mainnet** (eip155:8453) — standard USDC
-- **SKALE** (eip155:1187947933) — gasless, zero gas fees
-
-## x402 Payment Flow
-1. Agent sends POST to paid endpoint
-2. Server returns HTTP 402 with payment requirements in PAYMENT-REQUIRED header
-3. Agent signs gasless USDC transfer via x402 client SDK
-4. Agent retries request with PAYMENT-SIGNATURE header
-5. Server verifies payment via facilitator, settles on-chain
-6. Server returns research results + PAYMENT-RESPONSE receipt
-
-## MCP Auto-Pay
-When AGENTORACLE_WALLET_PRIVATE_KEY is set, this MCP server uses @x402/fetch
-to handle the entire payment flow automatically. The agent just calls the tool
-and gets results — payment happens transparently.
-
-## Discovery
-- x402 manifest: https://agentoracle.co/.well-known/x402-manifest.json
-- Health check: https://agentoracle.co/health
-- Website: https://agentoracle.co
-- GitHub: https://github.com/TKCollective/x402-research-skill
-`,
-      },
-    ],
-  })
-);
-
-// ── Start server ──────────────────────────────────────────────────
 async function main(): Promise<void> {
-  // Initialize x402 payment client (if wallet key provided)
-  await initX402();
-
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(
-    `AgentOracle MCP Server v2.1.2 running on stdio (x402 auto-pay: ${walletConfigured ? "enabled" : "disabled"})`
-  );
+  console.error(`tanilo-mcp ${VERSION} running on stdio (API: ${API_BASE})`);
 }
 
 main().catch((error) => {
