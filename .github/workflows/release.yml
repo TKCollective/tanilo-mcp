@@ -1,4 +1,7 @@
-name: Publish to npm
+# Publishing is manual: tanilo-mcp is published from the "tanilo" npm account by hand
+# (npm publish --access public, with 2FA). This workflow only builds and packs on a tag
+# so the tarball contents can be inspected; it never publishes.
+name: Build and pack on tag
 
 on:
   push:
@@ -6,23 +9,16 @@ on:
       - "v*"
 
 jobs:
-  publish:
+  pack:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
       contents: read
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          registry-url: "https://registry.npmjs.org"
-
       - run: npm ci
       - run: npm run build
-
-      - run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.MCP }}
+      - run: npm test
+      - run: npm pack --dry-run

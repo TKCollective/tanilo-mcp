@@ -2,7 +2,7 @@
   "name": "tanilo-mcp",
   "version": "3.0.0",
   "mcpName": "io.github.TKCollective/tanilo-mcp",
-  "description": "Tanilo checks the premise before an AI agent acts. Contract price check with a signed receipt.",
+  "description": "Tanilo checks the premise before an AI agent acts.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
