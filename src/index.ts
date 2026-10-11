@@ -118,7 +118,7 @@ server.tool(
       .regex(/^sha256-[0-9a-f]{64}$/)
       .optional()
       .describe("Optional subject.claim_hash. Any hash that identifies the purchase for you; by default the SHA-256 of the canonical JSON of the input object is used."),
-    agent_id: z.string().optional().describe("Optional agent identifier recorded in the receipt; otherwise the receipt carries the placeholder urn:tanilo:verify-facts:anonymous (receipts signed before 2026-10-13 carry did:ao:verify-facts:anonymous)"),
+    agent_id: z.string().optional().describe("Optional agent identifier recorded in the receipt; otherwise the receipt carries the placeholder urn:tanilo:verify-facts:anonymous"),
   },
   async ({ offer, terms, claim_hash, agent_id }) => {
     const input = { offer, terms };
