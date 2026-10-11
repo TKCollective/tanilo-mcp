@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.1 — unreleased (branch agent-id-wording)
+
+- `check-contract-price`: the `agent_id` parameter description names the placeholder the API records from the 2026-10-13 cutover, `urn:tanilo:verify-facts:anonymous`, and says receipts signed earlier carry `did:ao:verify-facts:anonymous`. No behaviour change.
+
 ## 3.0.0 — unreleased
 
 Renamed from `agentoracle-mcp` to `tanilo-mcp`; the package name, bin name and server name change, so this is a breaking release.
