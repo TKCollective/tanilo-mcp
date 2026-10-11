@@ -194,7 +194,7 @@ server.tool(
   "check-spend-cap",
   // Wording from the spend cap docs draft of 2026-10-10 (to be reviewed with the page).
   "Does this offer fit within the cap you supplied? Before an agent commits to a purchase, spend_cap multiplies the offer's unit price by its quantity, exactly, and compares the total with the remaining cap you supply. It signs the result when signing succeeds. " +
-    "You supply the cap and what has already been spent against it; Tanilo does not hold or look up your budgets, and keeps no running total. " +
+    "You supply the cap and what has already been spent against it; this check does not retrieve or track budgets, and keeps no running total. " +
     "Three results: verified, contradicted, or indeterminate with a reason. A verified result says the offer's total is within the remaining cap. Whether to pay is your policy's decision. " +
     "A valid signature shows which key signed these bytes and that they have not changed since. It does not show that the supplied cap was genuine or that the purchase is sensible.",
   {
