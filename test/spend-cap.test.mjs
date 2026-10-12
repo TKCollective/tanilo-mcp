@@ -30,7 +30,9 @@ test("tool set: check-spend-cap is present with the docs wording", async () => {
     const t = tools.find((x) => x.name === "check-spend-cap");
     assert.ok(t, tools.map((x) => x.name).join(", "));
     assert.match(t.description, /signs the result when signing succeeds/);
-    assert.match(t.description, /does not show that the supplied cap was genuine/);
+    assert.match(t.description, /does not retrieve budget balances, maintain a running balance or reserve funds/);
+    assert.match(t.description, /a key set you have authenticated as Tanilo's/);
+    assert.match(t.description, /does not establish that the supplied cap is authentic, approved or current, or that the purchase is authorized/);
     assert.ok(t.inputSchema.properties.offer && t.inputSchema.properties.cap);
   } finally { await client.close(); }
 });

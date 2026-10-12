@@ -192,11 +192,11 @@ const spendOfferSchema = z
 
 server.tool(
   "check-spend-cap",
-  // Wording from the spend cap docs draft of 2026-10-10 (to be reviewed with the page).
+  // Wording from the spend cap docs draft after review round 2 (2026-10-11).
   "Does this offer fit within the cap you supplied? Before an agent commits to a purchase, spend_cap multiplies the offer's unit price by its quantity, exactly, and compares the total with the remaining cap you supply. It signs the result when signing succeeds. " +
-    "You supply the cap and what has already been spent against it; this check does not retrieve or track budgets, and keeps no running total. " +
+    "You supply the cap and already_spent. This check does not retrieve budget balances, maintain a running balance or reserve funds. " +
     "Three results: verified, contradicted, or indeterminate with a reason. A verified result says the offer's total is within the remaining cap. Whether to pay is your policy's decision. " +
-    "A valid signature shows which key signed these bytes and that they have not changed since. It does not show that the supplied cap was genuine or that the purchase is sensible.",
+    "Verify the receipt's signature against a key set you have authenticated as Tanilo's. A valid signature establishes that the signed content verifies under the selected key and has not been altered. It does not establish that the supplied cap is authentic, approved or current, or that the purchase is authorized.",
   {
     offer: spendOfferSchema.describe("The offer to check"),
     cap: capSchema.describe("The cap you supply (caller-supplied, not verified as genuine)"),
@@ -236,7 +236,7 @@ server.tool(
       jwks_url: data.jwks_url,
       receipt: data.jws,
       note:
-        "A valid signature shows which key signed these bytes and that they have not changed since. It does not show that the supplied cap was genuine or that the purchase is sensible. Check the signature offline with tanilo-receipt-verify against the published key set.",
+        "Verify the receipt's signature against a key set you have authenticated as Tanilo's (published at https://tanilo.io/.well-known/jwks.json), for example offline with tanilo-receipt-verify. A valid signature establishes that the signed content verifies under the selected key and has not been altered. It does not establish that the supplied cap is authentic, approved or current, or that the purchase is authorized.",
     });
   }
 );
