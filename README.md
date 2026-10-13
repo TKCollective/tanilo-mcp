@@ -162,6 +162,7 @@ Set `TANILO_PYTHON` to a Python that has `tanilo-receipt-verify` installed and t
 
 - [tanilo.io](https://tanilo.io) — site and documentation
 - [tanilo.io/docs/contract-price-check](https://tanilo.io/docs/contract-price-check) — the checks this server exposes
+- [tanilo.io/docs/spend-cap-check](https://tanilo.io/docs/spend-cap-check) — the spend cap check
 - [tanilo.io/trust](https://tanilo.io/trust) — keys, and what a signature does and does not establish
 - [tanilo-receipt-spec](https://github.com/TKCollective/tanilo-receipt-spec) — the receipt format
 - [tanilo-receipt-verify](https://github.com/TKCollective/tanilo-receipt-verify) — offline signature check
