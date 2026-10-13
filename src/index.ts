@@ -199,7 +199,7 @@ server.tool(
     "Verify the receipt's signature against a key set you have authenticated as Tanilo's. A valid signature establishes that the signed content verifies under the selected key and has not been altered. It does not establish that the supplied cap is authentic, approved or current, or that the purchase is authorized.",
   {
     offer: spendOfferSchema.describe("The offer to check"),
-    cap: capSchema.describe("The cap you supply (caller-supplied, not verified as genuine)"),
+    cap: capSchema.describe("The cap you supply (caller-supplied). This check does not establish that the cap is authentic, approved or applicable to this purchase."),
     claim_hash: z.string().regex(/^sha256-[0-9a-f]{64}$/).optional().describe("Optional subject.claim_hash; by default the SHA-256 of the canonical JSON of the input object is used."),
     agent_id: z.string().optional().describe("Optional agent identifier recorded in the receipt; otherwise the receipt carries the placeholder urn:tanilo:verify-facts:anonymous"),
   },
