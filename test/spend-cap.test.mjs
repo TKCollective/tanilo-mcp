@@ -34,7 +34,7 @@ test("tool set: check-spend-cap is present with the docs wording", async () => {
     assert.match(t.description, /a key set you have authenticated as Tanilo's/);
     assert.match(t.description, /does not establish that the supplied cap is authentic, approved or current, or that the purchase is authorized/);
     assert.ok(t.inputSchema.properties.offer && t.inputSchema.properties.cap);
-    assert.equal(t.inputSchema.properties.cap.description, "The cap you supply (caller-supplied). This check does not establish that the cap is authentic, approved or applicable to this purchase.");
+    assert.equal(t.inputSchema.properties.cap.description, "The cap you supply (caller-supplied). This check does not establish that the cap is authentic, approved or applicable to this purchase, or that already_spent is complete or current.");
     const sibling = tools.find((x) => x.name === "check-contract-price");
     assert.equal(t.inputSchema.properties.agent_id.description, sibling.inputSchema.properties.agent_id.description);
     assert.match(t.inputSchema.properties.agent_id.description, /urn:tanilo:verify-facts:anonymous/);
