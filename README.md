@@ -114,18 +114,15 @@ The tool returns the check result and the signed receipt. Captured live on 2026-
     "remaining": "30.00",
     "excess": "7.50",
     "cap_already_exhausted": false,
-    "offer_sha256": "sha256-\u2026",
-    "cap_sha256": "sha256-\u2026",
-    "steps": "[ \u2026 ]"
+    "offer_sha256": "sha256-…",
+    "cap_sha256": "sha256-…",
+    "steps": [ … ]
   },
   "check_mode": "deterministic",
-  "canonical_sha256": "sha256-\u2026",
+  "canonical_sha256": "sha256-…",
   "kid": "tanilo-2026-10-ed25519-7d885da9",
   "jwks_url": "https://tanilo.io/.well-known/jwks.json",
-  "receipt": {
-    "payload": "\u2026",
-    "signatures": "[ \u2026 ]"
-  }
+  "receipt": { "payload": "…", "signatures": [ … ] }
 }
 ```
 
@@ -164,7 +161,7 @@ Set `TANILO_PYTHON` to a Python that has `tanilo-receipt-verify` installed and t
 ## Links
 
 - [tanilo.io](https://tanilo.io) — site and documentation
-- [tanilo.io/docs/contract-price-check](https://tanilo.io/docs/contract-price-check) — the check this server exposes
+- [tanilo.io/docs/contract-price-check](https://tanilo.io/docs/contract-price-check) — the checks this server exposes
 - [tanilo.io/trust](https://tanilo.io/trust) — keys, and what a signature does and does not establish
 - [tanilo-receipt-spec](https://github.com/TKCollective/tanilo-receipt-spec) — the receipt format
 - [tanilo-receipt-verify](https://github.com/TKCollective/tanilo-receipt-verify) — offline signature check
