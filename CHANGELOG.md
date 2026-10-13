@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.1.0 — unreleased (branch spend-cap-tool)
+## 3.1.0 — 2026-10-13
 
 - Added `check-spend-cap`: calls `POST /v1/verify-facts` with check type `spend_cap` (catalog revision v0.3) and returns the result (state, reason, total, remaining, excess) with the signed receipt. Requires the API to carry the check; until that deploys the tool answers 422 from the live API. Its test runs only when `TANILO_API_BASE` names a server that has the check. Description and result note after review round 2 (2026-10-11): the check does not retrieve budget balances, maintain a running balance or reserve funds; verify the signature against a key set you have authenticated as Tanilo's.
 
