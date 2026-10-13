@@ -2,11 +2,11 @@
 
 An MCP server that connects Claude Desktop, Cursor, Windsurf or any other MCP client to the Tanilo API at `https://api.tanilo.io`.
 
-Tanilo checks the premise before an AI agent acts. This server exposes one check, the contract price check, and two status documents. The routes it calls are live in free beta, rate-limited, no key needed. The server holds no secrets and makes no payments.
+Tanilo checks the premise before an AI agent acts. This server exposes two checks, the contract price check and the spend cap check, and two status documents. The routes it calls are live in free beta, rate-limited, no key needed. The server holds no secrets and makes no payments.
 
 Tanilo was AgentOracle until September 2026. Versions up to 2.1.2 were published as `agentoracle-mcp`; that package is no longer maintained.
 
-This README describes version 3.0.0. The outputs below were captured on 2026-10-08 by running the tools against the live API.
+This README describes version 3.1.0. The outputs below were captured by running the tools against the live API: on 2026-10-08 for the contract price check and on 2026-10-13 for the spend cap check.
 
 ---
 
@@ -85,6 +85,53 @@ python3 -c "import json; from tanilo_receipt_verify import verify; r = verify(js
 ```
 
 where `receipt.json` holds the tool's `receipt` object and `jwks.json` the key set.
+
+### `check-spend-cap`
+
+Does this offer fit within the cap you supplied? Before an agent commits to a purchase, `spend_cap` multiplies the offer's unit price by its quantity, exactly, and compares the total with the remaining cap you supply. It signs the result when signing succeeds.
+
+You supply the cap and `already_spent`. This check does not retrieve budget balances, maintain a running balance or reserve funds. Three results: verified, contradicted, or indeterminate with a reason. A verified result says the offer's total is within the remaining cap. Whether to pay is your policy's decision.
+
+Input: `offer` (`unit_price`, `currency`, and optionally `quantity`, `offered_at`, `seller`, `sku`) and `cap` (`amount`, `currency`, `scope` of `per_purchase` or `per_period`, and for `per_period` `already_spent` and `period` with `from` and `to`; optionally `cap_id`). Optional `claim_hash` and `agent_id` as for `check-contract-price`. The formats are on the docs page: https://tanilo.io/docs/spend-cap-check.
+
+The tool returns the check result and the signed receipt. Captured live on 2026-10-13 for the docs example (three calls at USD 12.50 against a USD 100.00 cap of which USD 70.00 is already spent), trimmed:
+
+```json
+{
+  "verdict": "halt",
+  "state": "contradicted",
+  "outcome": "fail",
+  "reason": "cap_exceeded",
+  "recommendation": "offer total exceeds the remaining cap the caller supplied",
+  "offer_total": "37.50",
+  "remaining": "30.00",
+  "excess": "7.50",
+  "cap_already_exhausted": false,
+  "evidence": {
+    "rule_id": "spend-cap/v0.1",
+    "cap_source": "caller_supplied",
+    "offer_total": "37.50",
+    "remaining": "30.00",
+    "excess": "7.50",
+    "cap_already_exhausted": false,
+    "offer_sha256": "sha256-\u2026",
+    "cap_sha256": "sha256-\u2026",
+    "steps": "[ \u2026 ]"
+  },
+  "check_mode": "deterministic",
+  "canonical_sha256": "sha256-\u2026",
+  "kid": "tanilo-2026-10-ed25519-7d885da9",
+  "jwks_url": "https://tanilo.io/.well-known/jwks.json",
+  "receipt": {
+    "payload": "\u2026",
+    "signatures": "[ \u2026 ]"
+  }
+}
+```
+
+With `"already_spent": "62.50"` the same offer is exactly at the cap: `state` `verified`, `remaining` `37.50`, `excess` `null`, `verdict` `act`.
+
+Verify the receipt's signature against a key set you have authenticated as Tanilo's, as for `check-contract-price`. A valid signature establishes that the signed content verifies under the selected key and has not been altered. It does not establish that the supplied cap is authentic, approved or current, or that the purchase is authorized.
 
 ### `check-health`
 
