@@ -1,8 +1,8 @@
 # Changelog
 
-## 3.0.1 — unreleased (branch agent-id-wording)
+## 3.0.1 — 2026-10-13
 
-- `check-contract-price`: the `agent_id` parameter description names the placeholder the API records from the 2026-10-13 cutover, `urn:tanilo:verify-facts:anonymous`, and says receipts signed earlier carry `did:ao:verify-facts:anonymous`. No behaviour change.
+- `check-contract-price`: the `agent_id` parameter description names the placeholder the API records from the cutover on 13 October 2026 (UTC), `urn:tanilo:verify-facts:anonymous`. No behaviour change.
 
 ## 3.0.0 — unreleased
 
